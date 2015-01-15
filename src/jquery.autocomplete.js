@@ -1,6 +1,7 @@
 /**
  * @fileOverview jquery-autocomplete, the jQuery Autocompleter
  * @author <a href="mailto:dylan@dyve.net">Dylan Verheul</a>
+ * @modifier <a href="mailto:mailtoshinu@gmail.com">Shinu Suresh</a>
  * @version 2.4.4
  * @requires jQuery 1.6+
  * @license MIT | GPL | Apache 2.0, see LICENSE.txt
@@ -192,11 +193,13 @@
                 data.push(decodeURIComponent(line[j]));
             }
             value = data.shift();
-            results.push({ value: value, data: data });
+            if($.trim(value) != ""){
+            	results.push({ value: value, data: data });
+            }           
         }
         return results;
     };
-
+       
     /**
      * Autocompleter class
      * @param {object} $elem jQuery object with one input tag
@@ -321,8 +324,19 @@
         this.dom.$results = $('<div></div>').hide().addClass(this.options.resultsClass).css({
             position: 'absolute'
         });
-        $('body').append(this.dom.$results);
-
+        $('#search').append(this.dom.$results);
+        
+        /**
+         * Hold all filters which does not return data
+         */
+        this.emptyFilter = [];
+        
+        /**
+         * This will be used to see the keywords with no data in return of ajax
+         * 
+         */
+        this.noData = [];
+        
         /**
          * Attach keyboard monitoring to $elem
          */
@@ -454,6 +468,14 @@
         this.dom.$results.css(position);
     };
 
+    
+    $.Autocompleter.prototype.noMatchFound = function(filter) {    	
+    	this.emptyFilter.push(filter);
+    	this.noData.push(filter);
+    	//console.log('Setting to no data '+this.noData);
+    };
+
+    
     /**
      * Read from cache
      * @private
@@ -498,14 +520,35 @@
                 this.cacheFlush();
             }
             filter = String(filter);
-            if (this.cacheData_[filter] !== undefined) {
+            if (this.cacheData_[filter] !== undefined) {            	
                 this.cacheLength_++;
             }
-            this.cacheData_[filter] = data;
+            //See if cache already has data, if so append it based on minChars
+            var min = this.options.minChars;
+            var isAppend = false;
+            $.each(this.cacheData_, function(key, value){
+            	//see if cache is already available
+            	var cacheId = filter.substring(0, min);            	
+            	if(key === cacheId){
+            		//console.log(key+' exists in cache. Just append the data');
+            		$.each(data, function(i, v){
+            			if($.trim(v.value) != ""){
+            				value.push(v);
+            			}            			
+            		});            		            	
+            		isAppend = true;
+            	}
+            	//console.log($(value).size());
+            });
+            if(!isAppend){
+            	this.cacheData_[filter] = data;
+            }            
             return this.cacheData_[filter];
         }
         return false;
     };
+    
+    
 
     /**
      * Flush cache
@@ -562,6 +605,15 @@
      */
     $.Autocompleter.prototype.fetchData = function(value) {
         var self = this;
+        var noDataFound = function ( elem ){
+			for ( var i = 0, length = self.noData.length; i < length; i++ ) {
+				//console.log('checking is '+self.noData[ i ]+' matched '+elem);
+				if ( elem.indexOf(self.noData[ i ]) >= 0) {
+					//console.log('Found element '+elem);
+    				return true;
+    			}
+			}        			
+		};
         var processResults = function(results, filter) {
             if (self.options.processData) {
                 results = self.options.processData(results);
@@ -574,9 +626,16 @@
         } else if (this.options.data) {
             processResults(this.options.data, value);
         } else {
-            this.fetchRemoteData(value, function(remoteData) {
-                processResults(remoteData, value);
-            });
+        	//Do not call if no data available which can be found by looking at emptyFilter
+        	if($.inArray(value, this.emptyFilter) === -1){
+        		//Invoke async calls only if there is no calls in execution.   
+        		
+        		if(!noDataFound(value)){
+        			this.fetchRemoteData(value, function(remoteData) {
+	                    processResults(remoteData, value);
+        			});
+        		}        				                    		
+        	}        	            
         }
     };
 
@@ -586,8 +645,24 @@
      * @param {function} callback The function to call after data retrieval
      * @private
      */
-    $.Autocompleter.prototype.fetchRemoteData = function(filter, callback) {
+    $.Autocompleter.prototype.fetchRemoteData = function(filter, callback) {    	
         var data = this.cacheRead(filter);
+        var isDataArray = $.isArray(data);
+        if(isDataArray){
+        	var found = false;
+        	//console.log($(this.cacheData_));
+        	$.map(data, function(val) {    
+        		//console.log(val.value+' returning '+val.value.search(filter));
+        		if(val.value.search(filter) != -1) {
+        			found = true;
+        			return;
+        	    }
+        	});
+        	//console.log('Found is '+found);
+        	if(!found){
+        		data = false;
+        	}
+        }        
         if (data) {
             callback(data);
         } else {
@@ -595,16 +670,23 @@
             var dataType = self.options.remoteDataType === 'json' ? 'json' : 'text';
             var ajaxCallback = function(data) {
                 var parsed = false;
-                if (data !== false) {
+                var replaceData = data;    
+                replaceData = $.trim(data);
+                //console.log('Replace data '+replaceData);
+                if (replaceData !== "") {
                     parsed = self.parseRemoteData(data);
                     self.cacheWrite(filter, parsed);
+                } else {
+                	self.noMatchFound(filter);                	
                 }
                 self.dom.$elem.removeClass(self.options.loadingClass);
-                callback(parsed);
+                //self.dom.$elem.removeAttr("disabled", true);
+                callback(parsed);                
             };
             this.dom.$elem.addClass(this.options.loadingClass);
+            //this.dom.$elem.attr("disabled", true);
             $.ajax({
-                url: this.makeUrl(filter),
+                url: this.makeUrl(filter),                
                 success: ajaxCallback,
                 error: function(jqXHR, textStatus, errorThrown) {
                     if($.isFunction(self.options.onError)) {
@@ -971,7 +1053,7 @@
     };
 
     $.Autocompleter.prototype.selectItem = function($li) {
-        var value = $li.data('value');
+        var value = $.trim($li.data('value'));
         var data = $li.data('data');
         var displayValue = this.displayValue(value, data);
         var processedDisplayValue = this.beforeUseConverter(displayValue);
