@@ -533,7 +533,16 @@
             		//console.log(key+' exists in cache. Just append the data');
             		$.each(data, function(i, v){
             			if($.trim(v.value) != ""){
-            				value.push(v);
+            				//console.log(v);
+            				//console.log(value);
+            				var check = $.grep( value, function( n, i ) {
+            					if(n === v)
+            						return true;
+            				}, true );
+            				//console.log('check is '+check);
+            				if($.isEmptyObject(check)){            					
+                				value.push(v);
+            				}            				
             			}            			
             		});            		            	
             		isAppend = true;
